@@ -1,5 +1,3 @@
-
-
 import datetime as dt
 import numpy as np
 import pandas as pd
@@ -11,19 +9,21 @@ from sqlalchemy import create_engine, func
 
 from flask import Flask, jsonify
 
-engine = create_engine("sqlite:///hawaii.sqlite")
-Base = automap_base()
-Base.prepare(engine, reflect=True)
 
-Measurement = Base.classes.measurement
-Station = Base.classes.station
-
-session = Session(engine)
+def get_session_and_tables():
+    engine = create_engine("sqlite://hawaii.sqlite")
+    Base = automap_base()
+    Base.prepare(engine, reflect=True)
+    Measurement = Base.classes.measurement
+    Station = Base.classes.station
+    session = Session(engine)
+    return (session, Measurement, Station)
 
 app = Flask(__name__)
 
 @app.route("/")
 def homepage():
+    # thread gets created to service the request
     """List of all returnable API routes."""
     return(
         f"(Note: Dates range from 2010-01-01 to 2017-08-23). <br><br>"
@@ -47,28 +47,35 @@ def homepage():
         
     )
 
+
+# Note - here we are getting the db variables
+# within the same thread that's servicing the request
+# So we don't throw some programming error on Windows machines
 @app.route("/api/v1.0/precipitation")
 def precipitation():
+    # connection to the db, session, tables
+    session, Measurement, Station = get_session_and_tables()
     """Return Dates and Temp from the last year."""
-    results = session.query(Measurement.date, Measurement.tobs).\
-        filter(Measurement.date >= "2016-02-13", Measurement.date <= "2017-02-13").\
-        all()
+    precip_analysis = session.query(Measurement.date, Measurement.prcp).filter(Measurement.date >= "2016-08-23").\
+        filter(Measurement.date <= "2017-08-23").all()
 
     # creates JSONified list
-    precipitation_list = [results]
+    precipitation_list = [precip_analysis]
 
     return jsonify(precipitation_list)
 
 @app.route("/api/v1.0/stations")
 def stations():
+    # connection to the db, session, tables
+    session, Measurement, Station = get_session_and_tables()
     """Return a list of stations"""
     active_station = session.query(Measurement.station, Station.name, func.count(Measurement.tobs)).\
     filter(Measurement.station == Station.station).group_by(Measurement.station).order_by(func.count(Measurement.tobs).desc()).all()
     # results = session.query(Station.name, Station.station, Station.elevation).all()
-
+     
     # creates JSONified list of dictionaries
     station_list = []
-    for result in results:
+    for result in active_station:
         row = {}
         row['name'] = result[0]
         row['station'] = result[1]
@@ -78,11 +85,13 @@ def stations():
 
 @app.route("/api/v1.0/tobs")
 def temp_obs():
+    # connection to the db, session, tables
+    session, Measurement, Station = get_session_and_tables()
     """Return a list of tobs for the previous year"""
     results = session.query(Station.name, Measurement.date, Measurement.tobs).\
-        filter(Measurement.date >= "2016-02-13", Measurement.date <= "2017-02-13").\
+        filter(Measurement.date >= "2016-08-24", Measurement.date <= "2017-08-23").\
         all()
-
+#
     # creates JSONified list of dictionaries
     tobs_list = []
     for result in results:
@@ -94,8 +103,10 @@ def temp_obs():
 
     return jsonify(tobs_list)
 
+
 @app.route('/api/v1.0/<date>/')
 def given_date(date):
+    session, Measurement, Station = get_session_and_tables()
     """Return the average temp, max temp, and min temp for the date"""
     results = session.query(func.avg(Measurement.tobs), func.max(Measurement.tobs), func.min(Measurement.tobs)).\
         filter(Measurement.date >= date).all()
@@ -115,6 +126,7 @@ def given_date(date):
 
 @app.route('/api/v1.0/<start_date>/<end_date>/')
 def query_dates(start_date, end_date):
+    session, Measurement, Station = get_session_and_tables()
     """Return the avg, max, min, temp over a specific time period"""
     results = session.query(func.avg(Measurement.tobs), func.max(Measurement.tobs), func.min(Measurement.tobs)).\
         filter(Measurement.date >= start_date, Measurement.date <= end_date).all()
